@@ -1,6 +1,7 @@
 import pygame
 import Piece
 import Box
+import random
 
 pygame.init()
 
@@ -9,6 +10,8 @@ WIDTH, HEIGHT = 600, 600
 ROWS, COLS = 8, 8 
 BOARD = []
 SQUARE_SIZE = WIDTH // COLS  
+
+captured_pieces = []
 
 # Colors
 WHITE = (255, 255, 255)
@@ -58,6 +61,117 @@ def initialize_board():
             # print(BOARD)
 
 
+def evaluate_board():
+    """Evaluate the board and return a score."""
+    piece_values = {"pawn": 1, "rook": 5, "knight": 3, "bishop": 3, "queen": 9, "king": 1000}
+    score = 0
+    for row in range(ROWS):
+        for col in range(COLS):
+            piece = BOARD[row][col].piece
+            if piece is not None:
+                value = piece_values.get(piece.name, 0)
+                score += value if piece.color == BLACK else -value
+    return score
+
+def get_all_valid_moves(color):
+    """Get all valid moves for the given color."""
+    valid_moves = []
+    for row in range(ROWS):
+        for col in range(COLS):
+            piece = BOARD[row][col].piece
+            if piece is not None and piece.color == color:
+                for dest_row in range(ROWS):
+                    for dest_col in range(COLS):
+                        if check_permission(piece, (row, col), (dest_row, dest_col)):
+                            valid_moves.append(((row, col), (dest_row, dest_col)))
+    return valid_moves
+
+
+def minimax(depth, is_maximizing, alpha, beta):
+    """Minimax algorithm with alpha-beta pruning."""
+    if depth == 0:
+        return evaluate_board(), None
+
+    valid_moves = get_all_valid_moves(BLACK if is_maximizing else WHITE)
+    if not valid_moves:
+        return evaluate_board(), None
+
+    best_move = None
+    if is_maximizing:
+        max_eval = float('-inf')
+        for move in valid_moves:
+            start_pos, end_pos = move
+            start_row, start_col = start_pos
+            end_row, end_col = end_pos
+
+            # Simulate the move
+            piece = BOARD[start_row][start_col].piece
+            captured_piece = BOARD[end_row][end_col].piece
+            BOARD[end_row][end_col].piece = piece
+            BOARD[start_row][start_col].piece = None
+
+            evaluation, _ = minimax(depth - 1, False, alpha, beta)
+
+            # Undo the move
+            BOARD[start_row][start_col].piece = piece
+            BOARD[end_row][end_col].piece = captured_piece
+
+            if evaluation > max_eval:
+                max_eval = evaluation
+                best_move = move
+            alpha = max(alpha, evaluation)
+            if beta <= alpha:
+                break
+        return max_eval, best_move
+    else:
+        min_eval = float('inf')
+        for move in valid_moves:
+            start_pos, end_pos = move
+            start_row, start_col = start_pos
+            end_row, end_col = end_pos
+
+            # Simulate the move
+            piece = BOARD[start_row][start_col].piece
+            captured_piece = BOARD[end_row][end_col].piece
+            BOARD[end_row][end_col].piece = piece
+            BOARD[start_row][start_col].piece = None
+
+            evaluation, _ = minimax(depth - 1, True, alpha, beta)
+
+            # Undo the move
+            BOARD[start_row][start_col].piece = piece
+            BOARD[end_row][end_col].piece = captured_piece
+
+            if evaluation < min_eval:
+                min_eval = evaluation
+                best_move = move
+            beta = min(beta, evaluation)
+            if beta <= alpha:
+                break
+        return min_eval, best_move
+
+
+def computer_move():
+    """Make a move for the computer using Minimax with iterative deepening."""
+    max_depth = 3  # Maximum depth for iterative deepening
+    best_move = None
+
+    for depth in range(1, max_depth + 1):
+        _, move = minimax(depth, True, float('-inf'), float('inf'))
+        if move:
+            best_move = move
+
+    if best_move:
+        start_pos, end_pos = best_move
+        start_row, start_col = start_pos
+        end_row, end_col = end_pos
+        move_piece(start_row, start_col, end_row, end_col)
+        print(f"Computer moved from {start_pos} to {end_pos}")
+    else:
+        print("No valid moves for the computer!")
+
+
+
 def is_path_clear(source_position, dest_position):
    
     source_row, source_col = source_position
@@ -84,27 +198,35 @@ def check_permission(piece, source_position, dest_position):
     source_row, source_col = source_position
     dest_row, dest_col = dest_position
 
-    print(f"Checking move for {piece.name} from {source_position} to {dest_position}")
-
+    # Check if the destination square is occupied by a piece of the same color
+    dest_piece = BOARD[dest_row][dest_col].piece
+    if dest_piece is not None and dest_piece.color == piece.color:
+        # print("Cannot move to a square occupied by your own piece")
+        return False
+    
     # Pawn movement logic
     if piece.name == "pawn":
-        print(piece.color)
         direction = 1 if piece.color == WHITE else -1  # White pawns move up, Black pawns move down
         
         if dest_col == source_col:  # Moving forward
             if dest_row == source_row - direction and BOARD[dest_row][dest_col].piece is None:
-                print("Pawn moving forward one step")
+                # print("Pawn moving forward one step")
                 return True
-            # Allow two-step move from starting position
-            if (source_row == 1 and piece.color == BLACK or source_row == 6 and piece.color == WHITE) and \
-               dest_row == source_row + 2 * direction and BOARD[dest_row][dest_col].piece is None:
-                print("Pawn moving forward two steps")
+            
+            # Two-step move from starting position
+            if (source_row == 6 and piece.color == WHITE or source_row == 1 and piece.color == BLACK) and \
+               dest_row == source_row - 2 * direction and \
+               BOARD[source_row - direction][source_col].piece is None and \
+               BOARD[dest_row][dest_col].piece is None:
+                # print("Pawn moving forward two steps")
                 return True
+            
         elif abs(dest_col - source_col) == 1 and dest_row == source_row + direction:  # Capturing diagonally
             if BOARD[dest_row][dest_col].piece is not None and BOARD[dest_row][dest_col].piece.color != piece.color:
                 print("Pawn capturing diagonally")
                 return True
-        print("Invalid pawn move")
+            
+        # print("Invalid pawn move")
         return False
 
     # Rook movement logic
@@ -147,6 +269,13 @@ def move_piece(start_row, start_col, end_row, end_col):
     piece = BOARD[start_row][start_col].piece
 
     if (check_permission(piece , (start_row , start_col) , (end_row , end_col) )) :
+        
+        captured_piece = BOARD[end_row][end_col].piece
+        if captured_piece is not None:
+            captured_pieces.append(captured_piece)  # Add the captured piece to the list
+            print(f"Captured piece: {captured_piece.name} ({'White' if captured_piece.color == WHITE else 'Black'})")
+
+
         # Move the piece to the destination box
         BOARD[end_row][end_col].piece = piece
 
@@ -169,9 +298,17 @@ def draw_board():
             # Draw the piece symbol if there is a piece
             piece = BOARD[row][col].piece  # Assuming Box.Box has a 'piece' attribute
             if piece is not None:
-                text = font.render(piece.symbol, True, (0, 0, 0))  # Render the piece symbol in black
+                font_color = (211, 211, 211) if piece.color == WHITE else (0, 0, 0)
+                text = font.render(piece.symbol, True, font_color )  # Render the piece symbol in black
                 text_rect = text.get_rect(center=(col * SQUARE_SIZE + SQUARE_SIZE // 2, row * SQUARE_SIZE + SQUARE_SIZE // 2))
                 screen.blit(text, text_rect)
+
+
+def is_game_over():
+    """Check if the game is over (e.g., checkmate or stalemate)."""
+    white_moves = get_all_valid_moves(WHITE)
+    black_moves = get_all_valid_moves(BLACK)
+    return not white_moves or not black_moves  # Game is over if no valid moves for either side
 
 # Main loop
 running = True
@@ -179,8 +316,13 @@ initialize_board()
 selected_box = None  # Initially, no box is selected
 
 while running:
+    # if is_game_over():
+    #     print("Game over!")
+    #     break
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
+            print("Captured pieces:", [(piece.name, "White" if piece.color == WHITE else "Black") for piece in captured_pieces])
             running = False
         # Detect mouse click
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 :
@@ -197,13 +339,29 @@ while running:
             else:
                 # If a box is already selected, call move_piece
                 start_row, start_col = selected_box
-                move_piece(start_row, start_col, row, col)
+                piece = BOARD[start_row][start_col].piece
 
-                # Reset the color of the previously selected box
-                BOARD[start_row][start_col].color = WHITE if (start_row + start_col) % 2 == 0 else BLACK
+                # Check if the user's move is valid
+                if check_permission(piece, (start_row, start_col), (row, col)):
+                    move_piece(start_row, start_col, row, col)
+                    user_made_valid_move = True  # User made a valid move
 
-                # Reset the selected box
-                selected_box = None    
+                    # Reset the color of the previously selected box
+                    BOARD[start_row][start_col].color = WHITE if (start_row + start_col) % 2 == 0 else BLACK
+
+                    # Reset the selected box
+                    selected_box = None
+
+                    # After the user's valid move, let the computer make its move
+                    computer_move()
+                else:
+                    print("Invalid move by user. Try again.")
+                    user_made_valid_move = False  # User did not make a valid move
+
+                # Reset the selected box if the move was invalid
+                if not user_made_valid_move:
+                    BOARD[start_row][start_col].color = WHITE if (start_row + start_col) % 2 == 0 else BLACK
+                    selected_box = None
     
     draw_board()
     pygame.display.flip()
